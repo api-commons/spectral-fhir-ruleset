@@ -1,0 +1,262 @@
+# CLEAN fixture — must be silent under fhir.yaml.
+#
+# A small but genuinely FHIR-shaped API: the capability statement, a search that
+# returns a searchset Bundle, an instance read with a weak ETag, an update with
+# If-Match and a 412, a create with Location, OperationOutcome on every error,
+# and SMART v2 scopes.
+
+openapi: 3.1.0
+
+info:
+  title: Clean FHIR API
+  description: >-
+    A FHIR R4 server. Content is negotiated with application/fhir+json;
+    fhirVersion=4.0.
+  version: 1.0.0
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+
+servers:
+  - url: https://fhir.example.com/r4
+
+security:
+  - smart: []
+
+paths:
+
+  /metadata:
+    get:
+      summary: Capability statement
+      description: Retrieve the server's CapabilityStatement.
+      operationId: capabilities
+      security: []
+      responses:
+        '200':
+          description: The CapabilityStatement.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/CapabilityStatement'
+        '500':
+          $ref: '#/components/responses/OperationOutcome'
+
+  /Patient:
+
+    get:
+      summary: Search patients
+      description: Search the Patient resource type.
+      operationId: searchPatient
+      parameters:
+        - $ref: '#/components/parameters/_format'
+        - name: identifier
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A searchset Bundle.
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Bundle'
+        '401':
+          $ref: '#/components/responses/OperationOutcome'
+        '500':
+          $ref: '#/components/responses/OperationOutcome'
+
+    post:
+      summary: Create a patient
+      description: Create a new Patient resource.
+      operationId: createPatient
+      requestBody:
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              $ref: '#/components/schemas/Patient'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location:
+              description: The URL of the newly created resource.
+              schema:
+                type: string
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '422':
+          $ref: '#/components/responses/OperationOutcome'
+        '500':
+          $ref: '#/components/responses/OperationOutcome'
+
+  /Patient/{id}:
+
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The resource's Logical Id.
+        schema:
+          type: string
+
+    get:
+      summary: Read a patient
+      description: Read the current state of a Patient.
+      operationId: readPatient
+      responses:
+        '200':
+          description: The Patient.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '404':
+          $ref: '#/components/responses/OperationOutcome'
+        '500':
+          $ref: '#/components/responses/OperationOutcome'
+
+    put:
+      summary: Update a patient
+      description: Update a Patient, optionally conditioned on its current version.
+      operationId: updatePatient
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: The ETag from a prior read, for optimistic locking.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              $ref: '#/components/schemas/Patient'
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '412':
+          $ref: '#/components/responses/OperationOutcome'
+        '422':
+          $ref: '#/components/responses/OperationOutcome'
+        '500':
+          $ref: '#/components/responses/OperationOutcome'
+
+components:
+
+  securitySchemes:
+    smart:
+      type: oauth2
+      description: SMART on FHIR.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://fhir.example.com/authorize
+          tokenUrl: https://fhir.example.com/token
+          scopes:
+            "patient/*.rs": Read and search any resource for the current patient.
+            "user/Observation.cruds": Full access to Observations the user can see.
+            "system/Patient.rs": Backend read and search of Patient.
+            launch: Obtain launch context.
+            openid: Authenticate the user.
+            fhirUser: Identify the current user.
+
+  parameters:
+    _format:
+      name: _format
+      in: query
+      required: false
+      description: Override HTTP content negotiation.
+      schema:
+        type: string
+
+  headers:
+    ETag:
+      description: >-
+        The resource versionId as a weak validator. Send it back in If-Match.
+      schema:
+        type: string
+        example: 'W/"3141"'
+
+  schemas:
+
+    Patient:
+      type: object
+      description: A FHIR Patient resource.
+      required: [resourceType]
+      properties:
+        resourceType:
+          const: Patient
+        id:
+          type: string
+
+    CapabilityStatement:
+      type: object
+      required: [resourceType]
+      properties:
+        resourceType:
+          const: CapabilityStatement
+        status:
+          type: string
+
+    Bundle:
+      type: object
+      description: A FHIR Bundle. For a search this is type = searchset.
+      required: [resourceType, type]
+      properties:
+        resourceType:
+          const: Bundle
+        type:
+          const: searchset
+        total:
+          type: integer
+        entry:
+          type: array
+          items:
+            type: object
+
+    OperationOutcome:
+      type: object
+      description: FHIR's error resource.
+      required: [resourceType, issue]
+      properties:
+        resourceType:
+          const: OperationOutcome
+        issue:
+          type: array
+          items:
+            type: object
+            properties:
+              severity:
+                type: string
+                enum: [fatal, error, warning, information]
+              code:
+                type: string
+              diagnostics:
+                type: string
+
+  responses:
+    OperationOutcome:
+      description: An error, as a FHIR OperationOutcome.
+      content:
+        application/fhir+json:
+          schema:
+            $ref: '#/components/schemas/OperationOutcome'

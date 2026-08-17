@@ -1,0 +1,428 @@
+# @api-common/spectral-fhir-ruleset
+#
+# A curated, OWNED, GROUNDED Spectral ruleset for HL7 FHIR R4 and R5 RESTful
+# APIs. Every rule uses Spectral's built-in functions only (schema / pattern /
+# enumeration / truthy / defined) so it runs anywhere Spectral runs, with no
+# custom JS.
+#
+# Each rule carries a stable id, a description quoting the part of the FHIR
+# specification it comes from, a message, a severity, and a documentationUrl
+# pointing at the specific section rather than at a homepage.
+#
+# Provenance: HL7 FHIR RESTful API, read in full.
+#   R4  https://hl7.org/fhir/R4/http.html
+#   R5  https://hl7.org/fhir/R5/http.html
+#   Search              https://hl7.org/fhir/R4/search.html
+#   OperationOutcome    https://hl7.org/fhir/R4/operationoutcome.html
+#   CapabilityStatement https://hl7.org/fhir/R4/capabilitystatement.html
+#   SMART scopes        https://hl7.org/fhir/smart-app-launch/scopes-and-launch-context.html
+#
+# WHAT THIS RULESET IS FOR, AND WHAT IT IS NOT.
+#
+# It governs an OpenAPI that DESCRIBES a FHIR API. It does not validate FHIR
+# resource instances, and it is not a substitute for the HL7 validator or for
+# profile/IG conformance — those need the StructureDefinitions, terminology
+# servers and the resource graph, none of which exist inside an OpenAPI
+# document. What an OpenAPI CAN tell you is whether the HTTP surface someone
+# built is the one FHIR specifies: the right media types, OperationOutcome on
+# errors, the capability statement, correct resource-type casing, optimistic
+# locking, and SMART scopes. That is what is checked here.
+#
+# The resource-type list embedded below is the UNION of the R4 and R5 resource
+# lists (178 types), harvested from hl7.org/fhir/{R4,R5}/resourcelist.html.
+# Union rather than one version, because flagging a valid R5 resource on an R5
+# API would be a false positive. It follows that this ruleset will NOT catch an
+# R4 API using an R5-only resource type — see README, "What this does not do".
+#
+# License: Apache-2.0 — Copyright 2026 API Commons (Kin Lane).
+
+extends: []
+
+aliases:
+  Operations:
+    - "$.paths[*][get,put,post,delete,patch,head]"
+  ErrorResponses:
+    - "$.paths[*][get,put,post,delete,patch,head].responses[?(@property.match(/^[45]\\d\\d$/))]"
+  PathKeys:
+    - "$.paths.*~"
+
+rules:
+
+  # =========================================================================
+  # Content types. FHIR R4 §3.1.0.1.9.
+  #
+  # "The formal MIME-type for FHIR resources is application/fhir+xml or
+  #  application/fhir+json. The correct mime type SHALL be used by clients and
+  #  servers"
+  #
+  # A FHIR API served as plain application/json is the single most common way
+  # an implementation is FHIR-shaped without being FHIR. Content negotiation is
+  # how a client tells a FHIR server apart from a JSON API that happens to
+  # return Patient objects.
+  # =========================================================================
+
+  fhir-media-type:
+    description: >-
+      FHIR R4 §3.1.0.1.9. The formal media type for FHIR resources is
+      application/fhir+json or application/fhir+xml, and the specification says
+      the correct type SHALL be used. Plain application/json is not FHIR content
+      negotiation.
+    message: "{{path}} — response content is not application/fhir+json (or +xml / +turtle)"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#mime-type
+    severity: warn
+    formats: [oas3]
+    given: "$.paths[*][get,put,post,delete,patch,head].responses[?(@property.match(/^2\\d\\d$/))].content"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["application/fhir+json"]
+            - required: ["application/fhir+xml"]
+            - required: ["application/fhir+turtle"]
+
+  fhir-request-media-type:
+    description: >-
+      FHIR R4 §3.1.0.1.9. Request bodies carrying a FHIR resource must use a
+      FHIR media type too, not plain application/json.
+    message: "{{path}} — request body is not application/fhir+json (or +xml / +turtle)"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#mime-type
+    severity: warn
+    formats: [oas3]
+    given: "$.paths[*][put,post,patch].requestBody.content"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["application/fhir+json"]
+            - required: ["application/fhir+xml"]
+            - required: ["application/fhir+turtle"]
+            - required: ["application/json-patch+json"]
+            - required: ["application/merge-patch+json"]
+
+  # =========================================================================
+  # Errors. FHIR R4 §3.1.0.1.6 and the OperationOutcome resource.
+  #
+  # "Any of these errors SHOULD be accompanied by an OperationOutcome resource
+  #  providing additional detail concerning the issue."
+  #
+  # OperationOutcome is FHIR's problem-details equivalent. A FHIR API that
+  # errors with a bespoke {"error": "..."} shape forces every client to carry
+  # two error parsers.
+  # =========================================================================
+
+  fhir-error-operationoutcome:
+    description: >-
+      FHIR R4 §3.1.0.1.6. Errors SHOULD be accompanied by an OperationOutcome
+      resource carrying the detail. Describe the 4xx/5xx response schema as an
+      OperationOutcome rather than a bespoke error object.
+    message: "{{path}} — 4xx/5xx response does not describe an OperationOutcome"
+    documentationUrl: https://hl7.org/fhir/R4/operationoutcome.html
+    severity: warn
+    formats: [oas3]
+    given: "#ErrorResponses.content[*].schema"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          required: ["properties"]
+          properties:
+            properties:
+              type: object
+              required: ["issue"]
+
+  # =========================================================================
+  # The capability statement. FHIR R4 §3.1.0.10.
+  #
+  # "GET [base]/metadata{?mode=[mode]} ... Applications SHALL return a resource
+  #  that describes the functionality of the server end-point."
+  #
+  # This is the SHALL that makes a FHIR server discoverable. Without /metadata
+  # a client cannot find out which resources and interactions are supported.
+  # =========================================================================
+
+  fhir-capabilities-endpoint:
+    description: >-
+      FHIR R4 §3.1.0.10. A FHIR server SHALL expose GET [base]/metadata
+      returning a CapabilityStatement. It is how a client discovers which
+      resource types and interactions the server actually supports.
+    message: "This API describes no /metadata path — a FHIR server SHALL expose a CapabilityStatement"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#capabilities
+    severity: warn
+    formats: [oas3]
+    given: "$"
+    then:
+      field: paths
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["/metadata"]
+            - required: ["metadata"]
+
+  # =========================================================================
+  # Resource type casing. FHIR R4 §3.1.0.1.1.
+  #
+  # "VERB [base]/[type]/[id] ... type: The name of a resource type (e.g.
+  #  Patient)"
+  #
+  # FHIR resource types are case-sensitive PascalCase singular names from a
+  # closed list. /patients and /Patients are both wrong, and both are what a
+  # team writes when they bolt FHIR-shaped payloads onto REST conventions.
+  # =========================================================================
+
+  fhir-resource-type-path-segment:
+    description: >-
+      FHIR R4 §3.1.0.1.1. Paths are [base]/[type]/[id] where [type] is a
+      case-sensitive FHIR resource type — PascalCase and singular, from the
+      published list. Plural or lowercase segments (/patients, /Patients) are
+      not addressable FHIR endpoints.
+    message: "{{property}} — first path segment is not a FHIR resource type (or one of the reserved paths: metadata, _history, _search, $operations)"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#paths
+    severity: error
+    formats: [oas3]
+    given: "#PathKeys"
+    then:
+      function: pattern
+      functionOptions:
+        # First segment must be a reserved path, an operation ($...), or one of
+        # the 182 R4 ∪ R5 resource types.
+        match: "^/($|\\$[A-Za-z0-9._-]+|_history|_search|metadata|Account|ActivityDefinition|ActorDefinition|AdministrableProductDefinition|AdverseEvent|AllergyIntolerance|Appointment|AppointmentResponse|ArtifactAssessment|AuditEvent|Basic|Binary|BiologicallyDerivedProduct|BiologicallyDerivedProductDispense|BodyStructure|Bundle|CapabilityStatement|CarePlan|CareTeam|CatalogEntry|ChargeItem|ChargeItemDefinition|Citation|Claim|ClaimResponse|ClinicalImpression|ClinicalUseDefinition|CodeSystem|Communication|CommunicationRequest|CompartmentDefinition|Composition|ConceptMap|Condition|ConditionDefinition|Consent|Contract|Coverage|CoverageEligibilityRequest|CoverageEligibilityResponse|DetectedIssue|Device|DeviceAssociation|DeviceDefinition|DeviceDispense|DeviceMetric|DeviceRequest|DeviceUsage|DeviceUseStatement|DiagnosticReport|DocumentManifest|DocumentReference|EffectEvidenceSynthesis|Encounter|EncounterHistory|Endpoint|EnrollmentRequest|EnrollmentResponse|EpisodeOfCare|EventDefinition|Evidence|EvidenceReport|EvidenceVariable|ExampleScenario|ExplanationOfBenefit|FamilyMemberHistory|Flag|FormularyItem|GenomicStudy|Goal|GraphDefinition|Group|GuidanceResponse|HealthcareService|ImagingSelection|ImagingStudy|Immunization|ImmunizationEvaluation|ImmunizationRecommendation|ImplementationGuide|Ingredient|InsurancePlan|InventoryItem|InventoryReport|Invoice|Library|Linkage|List|Location|ManufacturedItemDefinition|Measure|MeasureReport|Media|Medication|MedicationAdministration|MedicationDispense|MedicationKnowledge|MedicationRequest|MedicationStatement|MedicinalProduct|MedicinalProductAuthorization|MedicinalProductContraindication|MedicinalProductDefinition|MedicinalProductIndication|MedicinalProductIngredient|MedicinalProductInteraction|MedicinalProductManufactured|MedicinalProductPackaged|MedicinalProductPharmaceutical|MedicinalProductUndesirableEffect|MessageDefinition|MessageHeader|MolecularSequence|NamingSystem|NutritionIntake|NutritionOrder|NutritionProduct|Observation|ObservationDefinition|OperationDefinition|OperationOutcome|Organization|OrganizationAffiliation|PackagedProductDefinition|Parameters|Patient|PaymentNotice|PaymentReconciliation|Permission|Person|PlanDefinition|Practitioner|PractitionerRole|Procedure|Provenance|Questionnaire|QuestionnaireResponse|RegulatedAuthorization|RelatedPerson|RequestGroup|RequestOrchestration|Requirements|ResearchDefinition|ResearchElementDefinition|ResearchStudy|ResearchSubject|RiskAssessment|RiskEvidenceSynthesis|Schedule|SearchParameter|ServiceRequest|Slot|Specimen|SpecimenDefinition|StructureDefinition|StructureMap|Subscription|SubscriptionStatus|SubscriptionTopic|Substance|SubstanceDefinition|SubstanceNucleicAcid|SubstancePolymer|SubstanceProtein|SubstanceReferenceInformation|SubstanceSourceMaterial|SubstanceSpecification|SupplyDelivery|SupplyRequest|Task|TerminologyCapabilities|TestPlan|TestReport|TestScript|Transport|ValueSet|VerificationResult|VisionPrescription)(/|$)"
+
+  fhir-instance-id-parameter:
+    description: >-
+      FHIR R4 §3.1.0.1.1. An instance-level path is [base]/[type]/[id], where
+      the identifier is the resource's Logical Id. Name the path parameter `id`
+      so the URL reads the way the specification defines it.
+    message: "{{property}} — instance path parameter should be named `id` (the FHIR Logical Id)"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#paths
+    severity: info
+    formats: [oas3]
+    given: "#PathKeys"
+    then:
+      function: pattern
+      functionOptions:
+        notMatch: "^/[A-Za-z]+/\\{(?!id\\})[A-Za-z0-9_]+\\}"
+
+  # =========================================================================
+  # Optimistic locking. FHIR R4 §3.1.0.5.
+  #
+  # "Lost Updates, where two clients update the same resource, and the second
+  #  overwrites the updates of the first, can be prevented using a combination
+  #  of the ETag and If-Match header ... servers SHOULD always return an ETag
+  #  header with each resource"
+  #
+  # "the Version Id is considered a 'weak' ETag and ETag headers should be
+  #  prefixed with W/ and enclosed in quotes, for example: ETag: W/"3141""
+  # =========================================================================
+
+  fhir-read-etag:
+    description: >-
+      FHIR R4 §3.1.0.5. Servers SHOULD always return an ETag with each resource
+      — it carries the resource's versionId, and it is what a client sends back
+      in If-Match to avoid a lost update.
+    message: "{{path}} — 200 response does not document an `ETag` header"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#concurrency
+    severity: warn
+    formats: [oas3]
+    given: "$.paths[?(@property.match(/\\{[^}]+\\}$/))][get].responses[200]"
+    then:
+      field: headers
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["ETag"]
+            - required: ["etag"]
+
+  fhir-etag-weak:
+    description: >-
+      FHIR R4 §3.1.0.1.3. The FHIR versionId is a WEAK ETag — the header value
+      is prefixed with W/ and enclosed in quotes, e.g. W/"3141". A strong ETag
+      example in a FHIR API description is wrong and will be copied.
+    message: "{{path}} — ETag example should be a weak validator, e.g. W/\"3141\""
+    documentationUrl: https://hl7.org/fhir/R4/http.html#versioning
+    severity: info
+    formats: [oas3]
+    given:
+      - "$.paths[*][*].responses[*].headers[ETag].schema.example"
+      - "$.paths[*][*].responses[*].headers[ETag].example"
+      - "$.components.headers[ETag].schema.example"
+      - "$.components.headers[ETag].example"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^W/\".*\"$"
+
+  fhir-update-if-match:
+    description: >-
+      FHIR R4 §3.1.0.5. An update SHOULD accept If-Match so a client can
+      condition the write on the version it read. Without it, concurrent
+      writers silently overwrite each other.
+    message: "{{path}} — update does not accept an `If-Match` header"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#concurrency
+    severity: warn
+    formats: [oas3]
+    given: "$.paths[*][put]"
+    then:
+      field: parameters
+      function: schema
+      functionOptions:
+        schema:
+          type: array
+          contains:
+            type: object
+            properties:
+              name:
+                pattern: "^([Ii]f-[Mm]atch)$"
+              in:
+                const: header
+            required: ["name", "in"]
+
+  fhir-update-version-conflict:
+    description: >-
+      FHIR R4 §3.1.0.4. "409 / 412 - version conflict management". An update
+      that accepts If-Match has to document what happens when the precondition
+      fails, or a client cannot tell a conflict from a generic error.
+    message: "{{path}} — update documents neither a 409 nor a 412 for version conflict"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#update
+    severity: warn
+    formats: [oas3]
+    given: "$.paths[*][put]"
+    then:
+      field: responses
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["409"]
+            - required: ["412"]
+
+  fhir-create-location:
+    description: >-
+      FHIR R4 §3.1.0.4. On a 201 Created the server SHOULD return a Location
+      header naming the new resource, alongside the ETag carrying its first
+      versionId.
+    message: "{{path}} — 201 response does not document a `Location` header"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#create
+    severity: info
+    formats: [oas3]
+    given: "$.paths[*][post].responses[201]"
+    then:
+      field: headers
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["Location"]
+            - required: ["location"]
+
+  # =========================================================================
+  # Search. FHIR R4 §3.1.0.7 and search.html.
+  #
+  # "If the search succeeds, the server SHALL return a 200 OK HTTP status code
+  #  and the return content SHALL be a Bundle with type = searchset"
+  # =========================================================================
+
+  fhir-search-returns-bundle:
+    description: >-
+      FHIR R4 §3.1.0.7. A successful search SHALL return a Bundle with
+      type = searchset. A bare array of resources is not a FHIR search result —
+      it carries no total, no paging links, and no self link.
+    message: "{{path}} — search response should describe a Bundle (searchset), not a bare array"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#search
+    severity: warn
+    formats: [oas3]
+    given: "$.paths[?(@property.match(/^\\/[A-Z][A-Za-z]+$/))][get].responses[200].content[*].schema"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          not:
+            properties:
+              type:
+                const: array
+            required: ["type"]
+
+  fhir-format-parameter:
+    description: >-
+      FHIR R4 §3.1.0.1.11. `_format` is defined for use with every interaction,
+      and lets a client override HTTP content negotiation — which matters for
+      consumers that cannot set an Accept header. Document it where you support it.
+    message: "This API documents no `_format` parameter (FHIR general parameter)"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#parameters
+    severity: hint
+    formats: [oas3]
+    given: "$"
+    then:
+      field: components
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          required: ["parameters"]
+          properties:
+            parameters:
+              type: object
+              anyOf:
+                - required: ["_format"]
+                - required: ["format"]
+
+  # =========================================================================
+  # Authorization. SMART App Launch.
+  #
+  # SMART v2 scopes take the form <context>/<resource>.<permissions>, where
+  # context is patient | user | system, resource is a type or *, and the
+  # permission letters are c-r-u-d-s (create, read, update, delete, search) —
+  # e.g. patient/*.rs, user/*.cruds. SMART v1 used .read / .write.
+  # =========================================================================
+
+  fhir-smart-scopes:
+    description: >-
+      SMART App Launch. FHIR authorization scopes take the form
+      <context>/<resource>.<permissions> — patient, user or system, a resource
+      type or *, and the permission letters c/r/u/d/s (v2) or read/write/* (v1).
+      A FHIR API using ad-hoc scope names cannot be driven by a SMART client.
+    message: "{{property}} — not a SMART scope (expected e.g. patient/*.rs, user/Observation.cruds, launch, openid, fhirUser)"
+    documentationUrl: https://hl7.org/fhir/smart-app-launch/scopes-and-launch-context.html
+    severity: warn
+    formats: [oas3]
+    given: "$.components.securitySchemes[*].flows[*].scopes.*~"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^((patient|user|system)/([A-Z][A-Za-z]+|\\*)\\.(\\*|read|write|[cruds]+)|launch(/[a-z]+)?|openid|fhirUser|profile|offline_access|online_access)$"
+
+  # =========================================================================
+  # Version signalling. FHIR R4 §3.1.0.1.10.
+  #
+  # "This specification defines the MIME-type parameter fhirVersion ... e.g.
+  #  Accept: application/fhir+json; fhirVersion=4.0"
+  #
+  # R4 is 4.0, R5 is 5.0. An OpenAPI that never says which FHIR release it
+  # describes leaves a consumer to infer it from resource shapes.
+  # =========================================================================
+
+  fhir-version-declared:
+    description: >-
+      FHIR R4 §3.1.0.1.10. State which FHIR release the API implements — as the
+      fhirVersion media-type parameter, or at minimum by naming R4/R5 (or 4.0/5.0)
+      in info.description. Otherwise a consumer has to guess from resource shapes.
+    message: "info.description does not name a FHIR version (R4/R5 or 4.0/5.0)"
+    documentationUrl: https://hl7.org/fhir/R4/http.html#version-parameter
+    severity: info
+    formats: [oas3]
+    given: "$.info.description"
+    then:
+      function: pattern
+      functionOptions:
+        match: "(R[45]\\b|fhirVersion|[45]\\.0)"

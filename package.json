@@ -1,0 +1,54 @@
+{
+  "name": "@api-common/spectral-fhir-ruleset",
+  "version": "0.1.0",
+  "description": "A curated, owned, grounded Stoplight Spectral ruleset for HL7 FHIR R4 and R5 RESTful APIs \u2014 check that a FHIR-shaped API is actually FHIR. An API Commons tool.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "API Evangelist (https://apievangelist.com)",
+  "homepage": "https://apicommons.org/tools/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/api-commons/spectral-fhir-ruleset.git"
+  },
+  "bugs": {
+    "url": "https://github.com/api-commons/spectral-fhir-ruleset/issues"
+  },
+  "keywords": [
+    "spectral",
+    "fhir",
+    "hl7",
+    "fhir-r4",
+    "fhir-r5",
+    "smart-on-fhir",
+    "healthcare",
+    "ruleset",
+    "governance",
+    "openapi",
+    "api-commons"
+  ],
+  "main": "fhir.yaml",
+  "exports": {
+    ".": "./fhir.yaml"
+  },
+  "files": [
+    "fhir.yaml",
+    "fixtures/clean.yaml",
+    "fixtures/noncompliant.yaml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "lint:noncompliant": "spectral lint fixtures/noncompliant.yaml -r fhir.yaml -f json",
+    "lint:clean": "spectral lint fixtures/clean.yaml -r fhir.yaml -f json",
+    "test": "node scripts/test-ruleset.mjs"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-cli": "^6.11.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

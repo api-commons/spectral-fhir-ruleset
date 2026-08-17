@@ -1,0 +1,189 @@
+# NONCOMPLIANT fixture — must fire every rule in fhir.yaml.
+#
+# This is what "FHIR-shaped but not FHIR" looks like in the wild: REST
+# conventions with Patient objects inside. Plural lowercase paths, plain JSON,
+# a bespoke error envelope, a bare array from search, no capability statement,
+# no optimistic locking, and OAuth scopes a SMART client cannot use.
+
+openapi: 3.1.0
+
+info:
+  title: Noncompliant FHIR-ish API
+  description: >-
+    A health API that returns Patient objects. Deliberately does not name a
+    release, so fhir-version-declared fires.
+  version: 1.0.0
+
+servers:
+  - url: https://api.example.com
+
+security:
+  - oauth: []
+
+paths:
+
+  # Lowercase and plural — not an addressable FHIR endpoint.
+  # Fires fhir-resource-type-path-segment.
+  /patients:
+
+    get:
+      summary: Search patients
+      description: Search for patients.
+      operationId: searchPatients
+      responses:
+        '200':
+          description: A list of patients.
+          content:
+            # Plain JSON. Fires fhir-media-type.
+            application/json:
+              # A bare array, not a searchset Bundle.
+              # Fires fhir-search-returns-bundle.
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Patient'
+        '500':
+          $ref: '#/components/responses/Error'
+
+    post:
+      summary: Create a patient
+      description: Create a patient.
+      operationId: createPatient
+      requestBody:
+        required: true
+        content:
+          # Fires fhir-request-media-type.
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Patient'
+      responses:
+        # No Location header. Fires fhir-create-location.
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '500':
+          $ref: '#/components/responses/Error'
+
+  # Correctly cased resource type, but search returns a bare array instead of a
+  # searchset Bundle. Fires fhir-search-returns-bundle.
+  /Observation:
+    get:
+      summary: Search observations
+      description: Search for observations.
+      operationId: searchObservations
+      responses:
+        '200':
+          description: A list of observations.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        '500':
+          $ref: '#/components/responses/Error'
+
+  # Path parameter is `patientId`, not the FHIR Logical Id `id`.
+  # Fires fhir-instance-id-parameter.
+  /Patient/{patientId}:
+
+    parameters:
+      - name: patientId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      summary: Get a patient
+      description: Read a patient.
+      operationId: getPatient
+      responses:
+        # No ETag header. Fires fhir-read-etag.
+        '200':
+          description: The patient.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '404':
+          $ref: '#/components/responses/Error'
+
+    put:
+      summary: Update a patient
+      description: Update a patient.
+      operationId: updatePatient
+      # No If-Match. Fires fhir-update-if-match.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Patient'
+      responses:
+        # Neither 409 nor 412. Fires fhir-update-version-conflict.
+        '200':
+          description: Updated.
+          headers:
+            ETag:
+              description: The version.
+              schema:
+                type: string
+                # A STRONG validator. FHIR versionIds are weak.
+                # Fires fhir-etag-weak.
+                example: '"3141"'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '500':
+          $ref: '#/components/responses/Error'
+
+# No /metadata path anywhere. Fires fhir-capabilities-endpoint.
+# No components.parameters._format. Fires fhir-format-parameter.
+
+components:
+
+  securitySchemes:
+    oauth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://api.example.com/authorize
+          tokenUrl: https://api.example.com/token
+          scopes:
+            # Ad-hoc names a SMART client cannot use.
+            # Fires fhir-smart-scopes.
+            read:patients: Read patients.
+            write:patients: Write patients.
+
+  schemas:
+
+    Patient:
+      type: object
+      properties:
+        resourceType:
+          const: Patient
+        id:
+          type: string
+
+    # A bespoke error envelope instead of an OperationOutcome.
+    # Fires fhir-error-operationoutcome.
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+  responses:
+    Error:
+      description: An error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
