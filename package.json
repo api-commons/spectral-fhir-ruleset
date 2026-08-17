@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "A curated, owned, grounded Stoplight Spectral ruleset for HL7 FHIR R4 and R5 RESTful APIs \u2014 check that a FHIR-shaped API is actually FHIR. An API Commons tool.",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "CC-BY-NC-SA-4.0 AND Apache-2.0",
   "author": "API Evangelist (https://apievangelist.com)",
   "homepage": "https://apicommons.org/tools/",
   "repository": {
