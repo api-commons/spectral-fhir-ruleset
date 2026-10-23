@@ -1,6 +1,6 @@
 # @api-common/spectral-fhir-ruleset
 
-A curated, **owned**, **grounded** [Spectral](https://github.com/stoplightio/spectral)
+A curated, **owned**, **grounded** [OpenLint](https://openlint.org) (and [Spectral](https://github.com/stoplightio/spectral))
 ruleset for **HL7 FHIR R4 and R5** RESTful APIs — check that a FHIR-shaped API is
 actually FHIR.
 
@@ -14,7 +14,7 @@ extends:
   - https://raw.githubusercontent.com/api-commons/spectral-fhir-ruleset/main/fhir.yaml
 ```
 
-Built-in Spectral functions only — no custom JavaScript — so it runs anywhere Spectral
+Built-in OpenLint and Spectral functions only — no custom JavaScript — so it runs anywhere either
 runs, including in a browser.
 
 ## What it is for

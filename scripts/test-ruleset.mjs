@@ -10,7 +10,7 @@
 // The clean fixture is a small but genuinely FHIR-shaped API, so assertion 2
 // doubles as a guard against the resource-type and scope patterns over-matching.
 //
-// No test framework — spawn Spectral, parse JSON, exit non-zero on failure.
+// No test framework — spawn OpenLint, parse JSON, exit non-zero on failure.
 
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ let failures = 0;
 
 function lint(fixture) {
   const file = resolve(root, 'fixtures', fixture);
-  const bin = resolve(root, 'node_modules', '.bin', 'spectral');
+  const bin = resolve(root, 'node_modules', '.bin', 'openlint');
   // Write JSON to a file: with -f json the CLI still prints a human-readable
   // "No results ... found!" line to stdout, which would corrupt a parse.
   const outFile = resolve(tmpdir(), `fhir-spectral-${fixture}-${process.pid}.json`);
@@ -47,7 +47,7 @@ function lint(fixture) {
   try {
     json = JSON.parse(readFileSync(outFile, 'utf8').trim() || '[]');
   } catch {
-    console.error(`Failed to parse Spectral JSON output for ${fixture}.`);
+    console.error(`Failed to parse OpenLint JSON output for ${fixture}.`);
     console.error('stdout:', res.stdout);
     console.error('stderr:', res.stderr);
     process.exit(2);
